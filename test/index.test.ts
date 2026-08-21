@@ -3,8 +3,8 @@ import worker from '../src/index';
 import type { Env } from '../src/types';
 import { makeKeypair, signedRequest } from './support/signing';
 
-const NOW = new Date('2026-08-21T00:00:00Z');
-const TIMESTAMP = String(Math.floor(NOW.getTime() / 1000));
+/** Signed "now", because the worker rejects a stale signature. */
+const TIMESTAMP = String(Math.floor(Date.now() / 1000));
 
 const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
 
@@ -52,9 +52,7 @@ describe('worker.fetch', () => {
     const { publicKey, sign } = await makeKeypair();
     const request = await signedRequest({ body: '{"type":1}', timestamp: TIMESTAMP, sign });
 
-    vi.setSystemTime(NOW);
     const response = await worker.fetch(request, envWith(publicKey), ctx);
-    vi.useRealTimers();
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ type: 1 });
@@ -64,9 +62,7 @@ describe('worker.fetch', () => {
     const { publicKey, sign } = await makeKeypair();
     const request = await signedRequest({ body: 'not json at all', timestamp: TIMESTAMP, sign });
 
-    vi.setSystemTime(NOW);
     const response = await worker.fetch(request, envWith(publicKey), ctx);
-    vi.useRealTimers();
 
     expect(response.status).toBe(400);
   });
@@ -88,9 +84,7 @@ describe('worker.fetch', () => {
       },
     } as unknown as Env;
 
-    vi.setSystemTime(NOW);
     const response = await worker.fetch(request, broken, ctx);
-    vi.useRealTimers();
 
     expect(response.status).toBe(200);
     const payload = (await response.json()) as { data?: { content?: string } };
