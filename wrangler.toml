@@ -1,0 +1,18 @@
+name = "ctf-weekly-jp"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+# Monday 00:00 UTC = Monday 09:00 JST
+[triggers]
+crons = ["0 0 * * 1"]
+
+[vars]
+AI_BASE_URL = "https://api.mistral.ai/v1"
+AI_MODEL = "mistral-small-latest"
+CTFTIME_USER_AGENT = "ctf-weekly-jp/1.0 (+https://github.com/LITl-l/ctf-weekly-jp)"
+
+# Runtime config overrides written by /ctf config set
+# Create with: wrangler kv namespace create CONFIG
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

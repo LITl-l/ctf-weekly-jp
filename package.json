@@ -1,0 +1,24 @@
+{
+  "name": "ctf-weekly-jp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Weekly CTFtime digest posted to Discord in Japanese, with AI-estimated beginner difficulty",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "dryrun": "tsx scripts/dryrun.ts",
+    "register": "tsx scripts/register-commands.ts",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250801.0",
+    "@types/node": "^22.20.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.99.0"
+  }
+}
