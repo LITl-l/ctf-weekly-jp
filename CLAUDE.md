@@ -55,7 +55,9 @@ src/index.ts         Worker entry: scheduled() + fetch(). The only impure shell.
   Per-field caps are not enough: ten individually legal embeds still add up to a
   400, and because `postMessages` stops at the first failure, the message
   carrying the header takes every later one down with it. `buildMessages` packs
-  by both limits and the tests assert the sum, not just the parts.
+  by both limits and the tests assert the sum, not just the parts. `content` is
+  a third, separate 2000-character budget; the longest one this bot can build is
+  537 characters, so nothing enforces it.
 - **Nothing read back from KV or CTFtime is trusted.** A cast is not a check;
   both are validated at the module edge so an invalid date can never reach
   `Intl.DateTimeFormat`, which throws.
