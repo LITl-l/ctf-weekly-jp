@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_CONFIG, applyConfigKey, formatConfig, loadConfig } from '../src/config';
 
 describe('applyConfigKey', () => {
@@ -20,6 +20,22 @@ describe('applyConfigKey', () => {
     expect(applyConfigKey(DEFAULT_CONFIG, 'online_only', 'maybe').ok).toBe(false);
   });
 
+  it('rejects a fraction where only whole items make sense', () => {
+    expect(applyConfigKey(DEFAULT_CONFIG, 'max_events', '2.7').ok).toBe(false);
+    expect(applyConfigKey(DEFAULT_CONFIG, 'days', '7.5').ok).toBe(false);
+  });
+
+  it('rejects a blank value rather than reading it as zero', () => {
+    expect(applyConfigKey(DEFAULT_CONFIG, 'weight_min', '').ok).toBe(false);
+    expect(applyConfigKey(DEFAULT_CONFIG, 'weight_min', '   ').ok).toBe(false);
+  });
+
+  it('still allows a fractional weight, which CTFtime itself reports', () => {
+    const result = applyConfigKey(DEFAULT_CONFIG, 'weight_min', '12.5');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.weightMin).toBe(12.5);
+  });
+
   it('enforces numeric bounds', () => {
     expect(applyConfigKey(DEFAULT_CONFIG, 'days', '0').ok).toBe(false);
     expect(applyConfigKey(DEFAULT_CONFIG, 'days', '61').ok).toBe(false);
@@ -38,6 +54,32 @@ describe('loadConfig', () => {
   it('merges partial overrides over defaults', async () => {
     const kv = { get: async () => ({ days: 30 }) } as unknown as KVNamespace;
     await expect(loadConfig(kv)).resolves.toEqual({ ...DEFAULT_CONFIG, days: 30 });
+  });
+
+  it('ignores a stored value of the wrong type', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const kv = { get: async () => ({ days: 'abc' }) } as unknown as KVNamespace;
+    await expect(loadConfig(kv)).resolves.toEqual(DEFAULT_CONFIG);
+    warn.mockRestore();
+  });
+
+  it('ignores a stored value outside the bounds the command enforces', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const kv = { get: async () => ({ days: 999, maxEvents: 0 }) } as unknown as KVNamespace;
+    await expect(loadConfig(kv)).resolves.toEqual(DEFAULT_CONFIG);
+    warn.mockRestore();
+  });
+
+  it('keeps the sound keys when one stored value is corrupt', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const kv = { get: async () => ({ days: 30, weightMin: 'nonsense' }) } as unknown as KVNamespace;
+    await expect(loadConfig(kv)).resolves.toEqual({ ...DEFAULT_CONFIG, days: 30 });
+    warn.mockRestore();
+  });
+
+  it('ignores a stored value that is not an object at all', async () => {
+    const kv = { get: async () => 'nonsense' } as unknown as KVNamespace;
+    await expect(loadConfig(kv)).resolves.toEqual(DEFAULT_CONFIG);
   });
 
   it('falls back to defaults when KV throws', async () => {

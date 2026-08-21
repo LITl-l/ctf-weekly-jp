@@ -41,10 +41,36 @@ export interface FetchOptions {
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * A rejected User-Agent answers 403 deterministically and a malformed payload
+ * re-parses identically, so retrying either just doubles the doomed requests.
+ */
+const isTransient = (failure: FetchFailure): boolean =>
+  failure.kind === 'network' ||
+  (failure.kind === 'http' && (failure.status === 429 || failure.status >= 500));
+
 const buildUrl = (window: DateWindow, limit: number): string => {
   const start = Math.floor(window.from.getTime() / 1000);
   const finish = Math.floor(window.to.getTime() / 1000);
   return `${API_URL}?limit=${limit}&start=${start}&finish=${finish}`;
+};
+
+/**
+ * A cast is not a check: a renamed or missing field used to travel all the way
+ * into `Intl.DateTimeFormat`, which throws on an invalid date and takes the
+ * whole digest down. These three fields are the ones an embed cannot be built
+ * without; everything else already has a fallback at the point of use.
+ */
+const isRenderable = (value: unknown): value is CtftimeEvent => {
+  if (typeof value !== 'object' || value === null) return false;
+  const event = value as Record<string, unknown>;
+  return (
+    typeof event.title === 'string' &&
+    typeof event.start === 'string' &&
+    typeof event.finish === 'string' &&
+    Number.isFinite(Date.parse(event.start)) &&
+    Number.isFinite(Date.parse(event.finish))
+  );
 };
 
 const readEvents = async (
@@ -58,9 +84,18 @@ const readEvents = async (
   );
   if (!parsed.ok) return parsed;
 
-  return Array.isArray(parsed.value)
-    ? ok(parsed.value as ReadonlyArray<CtftimeEvent>)
-    : err({ kind: 'shape', message: 'expected an array of events' });
+  if (!Array.isArray(parsed.value)) {
+    return err({ kind: 'shape', message: 'expected an array of events' });
+  }
+
+  const events = parsed.value.filter(isRenderable);
+  const dropped = parsed.value.length - events.length;
+  // Loud, because a silent drop looks exactly like a quiet week.
+  if (dropped > 0) console.warn(`ctftime: dropped ${dropped} unrenderable event(s)`);
+
+  return events.length === 0 && parsed.value.length > 0
+    ? err({ kind: 'shape', message: 'no renderable events in payload' })
+    : ok(events);
 };
 
 /** Fetches events starting within the next `days` days. Never throws. */
@@ -91,7 +126,7 @@ export const fetchEvents = async (
     remaining: number,
   ): Promise<Result<ReadonlyArray<CtftimeEvent>, FetchFailure>> => {
     const result = await once();
-    if (result.ok || remaining <= 0) return result;
+    if (result.ok || remaining <= 0 || !isTransient(result.error)) return result;
     await sleep(retryDelayMs);
     return attemptWithRetries(remaining - 1);
   };
