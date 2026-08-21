@@ -51,6 +51,14 @@ src/index.ts         Worker entry: scheduled() + fetch(). The only impure shell.
   prompt.
 - **Discord kills any interaction not acknowledged within 3 seconds.** Anything
   slower must return a deferred response and finish in `ctx.waitUntil()`.
+- **Discord rejects a message whose embeds total more than 6000 characters.**
+  Per-field caps are not enough: ten individually legal embeds still add up to a
+  400, and because `postMessages` stops at the first failure, the message
+  carrying the header takes every later one down with it. `buildMessages` packs
+  by both limits and the tests assert the sum, not just the parts.
+- **Nothing read back from KV or CTFtime is trusted.** A cast is not a check;
+  both are validated at the module edge so an invalid date can never reach
+  `Intl.DateTimeFormat`, which throws.
 - **Never post nothing.** Zero matches, a CTFtime outage, and a total AI failure
   each produce a message. Silence is indistinguishable from a broken bot.
 - **An AI failure never drops an event.** It falls back to a rule-based verdict,
