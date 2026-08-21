@@ -11,6 +11,12 @@ import { truncate } from './text';
 
 const JST = 'Asia/Tokyo';
 const EMBEDS_PER_MESSAGE = 10;
+/**
+ * Discord rejects a whole message when the combined length of its embeds —
+ * titles, descriptions, footers and every field name and value — exceeds this.
+ * Per-field caps alone are not enough: ten legal embeds still add up to a 400.
+ */
+const MESSAGE_EMBED_BUDGET = 6000;
 
 const RESTRICTION_JA: Readonly<Record<string, string>> = {
   open: '誰でも参加可',
@@ -81,7 +87,11 @@ const buildFields = (
     inline: false,
   },
   { name: '🎯 形式', value: truncate(translateFormat(event), 1024), inline: true },
-  { name: '🔑 参加条件', value: translateRestriction(event.restrictions), inline: true },
+  {
+    name: '🔑 参加条件',
+    value: truncate(translateRestriction(event.restrictions), 1024),
+    inline: true,
+  },
   { name: '⚖️ weight', value: event.weight ? event.weight.toFixed(2) : '未評価', inline: true },
   {
     name: '🧩 予想ジャンル',
@@ -103,15 +113,34 @@ const FOOTER: Readonly<Record<EventSummary['source'], string>> = {
   rule: '難易度はweightからの自動判定です（AI要約は取得できませんでした） · 出典: CTFtime',
 };
 
-export const buildEmbed = (event: CtftimeEvent, summary: EventSummary): DiscordEmbed => ({
-  title: truncate(`${DIFFICULTY_LABELS[summary.difficulty].split(' ')[0]} ${event.title}`, 256),
-  url: event.ctftime_url,
-  description: truncate(summary.summaryJa, 2000),
-  color: DIFFICULTY_COLORS[summary.difficulty],
-  ...(event.logo ? { thumbnail: { url: event.logo } } : {}),
-  fields: buildFields(event, summary),
-  footer: { text: FOOTER[summary.source] },
-});
+export const embedChars = (embed: DiscordEmbed): number =>
+  (embed.title?.length ?? 0) +
+  (embed.description?.length ?? 0) +
+  (embed.footer?.text.length ?? 0) +
+  (embed.fields ?? []).reduce((total, field) => total + field.name.length + field.value.length, 0);
+
+/**
+ * An embed too large to share a message with anything still has to be posted, so
+ * the description — the one field with slack — gives up exactly the excess.
+ */
+const fitToBudget = (embed: DiscordEmbed): DiscordEmbed => {
+  const excess = embedChars(embed) - MESSAGE_EMBED_BUDGET;
+  if (excess <= 0) return embed;
+
+  const description = embed.description ?? '';
+  return { ...embed, description: truncate(description, description.length - excess) };
+};
+
+export const buildEmbed = (event: CtftimeEvent, summary: EventSummary): DiscordEmbed =>
+  fitToBudget({
+    title: truncate(`${DIFFICULTY_LABELS[summary.difficulty].split(' ')[0]} ${event.title}`, 256),
+    url: event.ctftime_url,
+    description: truncate(summary.summaryJa, 2000),
+    color: DIFFICULTY_COLORS[summary.difficulty],
+    ...(event.logo ? { thumbnail: { url: event.logo } } : {}),
+    fields: buildFields(event, summary),
+    footer: { text: FOOTER[summary.source] },
+  });
 
 const formatRange = (window: DateWindow): string =>
   `${formatJstDate(window.from)}〜${formatJstDate(window.to)}`;
@@ -131,12 +160,29 @@ export const buildHeader = (
   ].join('\n');
 };
 
-const chunk = <T>(items: ReadonlyArray<T>, size: number): ReadonlyArray<ReadonlyArray<T>> =>
-  Array.from({ length: Math.ceil(items.length / size) }, (_, i) =>
-    items.slice(i * size, i * size + size),
-  );
+const totalChars = (embeds: ReadonlyArray<DiscordEmbed>): number =>
+  embeds.reduce((total, embed) => total + embedChars(embed), 0);
 
-/** Discord allows at most 10 embeds per message, so long digests span messages. */
+/** Greedy packing: fill a message until either limit would be crossed. */
+const packEmbeds = (
+  embeds: ReadonlyArray<DiscordEmbed>,
+): ReadonlyArray<ReadonlyArray<DiscordEmbed>> =>
+  embeds.reduce<DiscordEmbed[][]>((messages, embed) => {
+    const current = messages[messages.length - 1];
+    const fits =
+      current !== undefined &&
+      current.length < EMBEDS_PER_MESSAGE &&
+      totalChars(current) + embedChars(embed) <= MESSAGE_EMBED_BUDGET;
+
+    if (fits) current.push(embed);
+    else messages.push([embed]);
+    return messages;
+  }, []);
+
+/**
+ * Discord allows at most 10 embeds per message and 6000 characters across them,
+ * so long digests span messages. Neither limit may drop an event.
+ */
 export const buildMessages = (
   events: ReadonlyArray<CtftimeEvent>,
   summaries: ReadonlyArray<EventSummary>,
@@ -144,13 +190,12 @@ export const buildMessages = (
 ): ReadonlyArray<DiscordMessage> => {
   if (events.length === 0) return [{ content: buildEmptyMessage(window) }];
 
-  return chunk(
-    events.map((event, index) => buildEmbed(event, summaries[index]!)),
-    EMBEDS_PER_MESSAGE,
-  ).map((embeds, index) => ({
-    ...(index === 0 ? { content: buildHeader(events, summaries, window) } : {}),
-    embeds,
-  }));
+  return packEmbeds(events.map((event, index) => buildEmbed(event, summaries[index]!))).map(
+    (embeds, index) => ({
+      ...(index === 0 ? { content: buildHeader(events, summaries, window) } : {}),
+      embeds,
+    }),
+  );
 };
 
 export const buildEmptyMessage = (window: DateWindow): string =>

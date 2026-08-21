@@ -37,7 +37,7 @@ describe('postMessages', () => {
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toEqual({ kind: 'http', status: 429 });
+    expect(result.error).toMatchObject({ kind: 'http', status: 429 });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
@@ -47,8 +47,19 @@ describe('postMessages', () => {
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toEqual({ kind: 'http', status: 400 });
+    expect(result.error).toMatchObject({ kind: 'http', status: 400 });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the rejection body so an operator can tell why Discord refused', async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response('embeds: Must be 6000 or fewer in length', { status: 400 }),
+    );
+    const result = await postMessages(URL, [{ content: 'one' }], fetchImpl as unknown as typeof fetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok || result.error.kind !== 'http') return;
+    expect(result.error.detail).toContain('6000');
   });
 
   it('stops at the first failure rather than posting the rest', async () => {
