@@ -49,5 +49,3 @@ export const ruleSummary = (event: CtftimeEvent): EventSummary => {
     source: 'rule',
   };
 };
-
-export { truncate } from './text';

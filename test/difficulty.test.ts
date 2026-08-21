@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { difficultyFromWeight, isDifficulty, ruleSummary, truncate } from '../src/difficulty';
+import { difficultyFromWeight, isDifficulty, ruleSummary } from '../src/difficulty';
 import type { CtftimeEvent } from '../src/types';
 import { makeEvent } from './support/event';
 
@@ -41,12 +41,5 @@ describe('isDifficulty', () => {
     expect(isDifficulty('beginner')).toBe(true);
     expect(isDifficulty('easy')).toBe(false);
     expect(isDifficulty(undefined)).toBe(false);
-  });
-});
-
-describe('truncate', () => {
-  it('leaves short text alone and ellipsises long text', () => {
-    expect(truncate('abc', 5)).toBe('abc');
-    expect(truncate('abcdef', 5)).toBe('abcd…');
   });
 });
