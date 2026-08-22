@@ -9,6 +9,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "dryrun": "tsx scripts/dryrun.ts",
+    "wrangler": "wrangler",
     "register": "tsx scripts/register-commands.ts",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
