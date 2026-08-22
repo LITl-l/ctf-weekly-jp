@@ -56,17 +56,26 @@ weight からのルールベース判定にフォールバックします（そ�
 ```bash
 npm install
 
+# Cloudflare にログイン
+npm run wrangler -- login
+
 # KV 名前空間を作り、出力された id を wrangler.toml に貼る
-npx wrangler kv namespace create CONFIG
+npm run wrangler -- kv namespace create CONFIG
 
 # シークレットを登録
-npx wrangler secret put AI_API_KEY
-npx wrangler secret put DISCORD_WEBHOOK_URL
-npx wrangler secret put DISCORD_PUBLIC_KEY   # Discord Developer Portal → General Information
-npx wrangler secret put DISCORD_APP_ID
+npm run wrangler -- secret put AI_API_KEY
+npm run wrangler -- secret put DISCORD_WEBHOOK_URL
+npm run wrangler -- secret put DISCORD_PUBLIC_KEY   # Discord Developer Portal → General Information
+npm run wrangler -- secret put DISCORD_APP_ID
 
 npm run deploy
 ```
+
+> `npx` を使わないのは意図的です。`npx` はローカルに無いパッケージをレジストリから
+> 取得して実行するため、CI やセットアップ手順に混ぜるとサプライチェーン上の穴になります。
+> `npm run wrangler` は `package-lock.json` で固定された `node_modules/.bin` の版だけを
+> 実行し、レジストリを参照しません。どうしても直接実行したい場合は
+> `npm exec --no -- wrangler ...`（未インストールなら取得せず失敗する）を使ってください。
 
 ### 4. スラッシュコマンドを登録する
 
@@ -116,7 +125,7 @@ Discord Developer Portal →「Interactions Endpoint URL」に
 ```bash
 nix develop          # node 22 が入った開発シェル
 npm install
-npm test             # 88 tests
+npm test             # 130 tests
 npm run typecheck
 npm run dryrun       # 実際の CTFtime を叩いて結果を標準出力に表示（Discordには投稿しない）
 
