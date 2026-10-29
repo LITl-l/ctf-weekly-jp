@@ -123,7 +123,7 @@ Discord Developer Portal →「Interactions Endpoint URL」に
 ## 開発
 
 ```bash
-nix develop          # node 22 が入った開発シェル
+nix develop          # node 26 が入った開発シェル
 npm install
 npm test             # 130 tests
 npm run typecheck

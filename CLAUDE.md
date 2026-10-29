@@ -10,15 +10,15 @@ There is no global Node on the development machine. Every command goes through
 Nix:
 
 ```bash
-nix shell nixpkgs#nodejs_22 --command npm test
-nix shell nixpkgs#nodejs_22 --command npm run typecheck
-nix shell nixpkgs#nodejs_22 --command npm run dryrun
+nix shell nixpkgs#nodejs_26 --command npm test
+nix shell nixpkgs#nodejs_26 --command npm run typecheck
+nix shell nixpkgs#nodejs_26 --command npm run dryrun
 ```
 
 `nix develop` is provided by `flake.nix` for humans, but **it fails in this
 repo when files are untracked** — flakes only see git-tracked files, and this is
 a colocated jj repo where new files stay untracked until a commit. Use
-`nix shell nixpkgs#nodejs_22 --command` for scripted work.
+`nix shell nixpkgs#nodejs_26 --command` for scripted work.
 
 `npm run dryrun` hits the real CTFtime API, runs the real pipeline, and prints
 the digest to stdout. It posts nothing to Discord and needs no secrets. It is

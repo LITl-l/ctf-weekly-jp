@@ -12,7 +12,7 @@
     {
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = [ pkgs.nodejs_22 ];
+          packages = [ pkgs.nodejs_26 ];
           shellHook = ''
             echo "ctf-weekly-jp — node $(node -v)"
             echo "  npm install && npm test"
