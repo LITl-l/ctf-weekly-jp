@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { summarizeEvent } from '../src/ai';
+import { describeAiFailure, summarizeEvent } from '../src/ai';
 import { makeEvent } from './support/event';
 
 /**
@@ -22,6 +22,20 @@ let baseUrl: string;
 let received: Received[] = [];
 /** Set by a test to make the server reject `response_format` like some NIM models do. */
 let rejectJsonMode = false;
+/** Set by a test to force an error status and body on every request. */
+let forced: { status: number; body: string } | null = null;
+
+/**
+ * Verbatim error bodies captured from Gemini's OpenAI-compatible endpoint. The
+ * 404 is what a retired model answers, the 400 what a rejected key answers.
+ * Hand-written stand-ins would not have caught that the useful part of the 404
+ * is the sentence, not the status: both of these used to reach the operator as
+ * nothing but `summaries: {"rule":N}`.
+ */
+const RETIRED_MODEL_404 =
+  '{"error":{"code":404,"message":"This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements.","status":"NOT_FOUND"}}';
+const MISSING_AUTH_400 =
+  '{"error":{"code":400,"message":"Missing or invalid Authorization header.","status":"INVALID_ARGUMENT"}}';
 
 const COMPLETION = {
   choices: [
@@ -52,6 +66,14 @@ beforeAll(async () => {
         body,
       });
 
+      // Checked before `rejectJsonMode` so a forced error applies to the retry
+      // too, which is what a real 404 or a real auth failure does.
+      if (forced) {
+        res.writeHead(forced.status, { 'Content-Type': 'application/json' });
+        res.end(forced.body);
+        return;
+      }
+
       if (rejectJsonMode && body.response_format) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'response_format is not supported by this model' }));
@@ -67,6 +89,13 @@ beforeAll(async () => {
   const address = server.address();
   if (typeof address === 'string' || address === null) throw new Error('no port');
   baseUrl = `http://127.0.0.1:${address.port}/v1`;
+});
+
+/** Explicit, so test order can never decide what the server does. */
+beforeEach(() => {
+  received = [];
+  rejectJsonMode = false;
+  forced = null;
 });
 
 afterAll(async () => {
@@ -140,5 +169,76 @@ describe('AI adapter over a real HTTP server', () => {
 
     await summarizeEvent(event, { baseUrl: `${baseUrl}/`, model: 'm', apiKey: 'k' });
     expect(received[0]!.url).toBe('/v1/chat/completions');
+  });
+});
+
+/**
+ * A failed AI call must stay invisible to readers of the digest and visible to
+ * whoever runs the dry run. These assert both halves: the event keeps its
+ * rule-based verdict, and the status plus the provider's own words survive.
+ */
+describe('AI failures carry their cause', () => {
+  it('reports status and a body snippet when the model has been retired', async () => {
+    forced = { status: 404, body: RETIRED_MODEL_404 };
+
+    const summary = await summarizeEvent(event, {
+      baseUrl,
+      model: 'gemini-2.5-flash',
+      apiKey: 'sk-test-123',
+    });
+
+    // The event is never dropped, and the verdict is unchanged.
+    expect(summary.source).toBe('rule');
+    expect(summary.difficulty).toBe('unknown');
+    expect(summary.reasonJa).toBeTruthy();
+
+    const failure = summary.aiFailure;
+    expect(failure?.kind).toBe('http');
+    if (failure?.kind !== 'http') throw new Error('expected an http failure');
+    expect(failure.status).toBe(404);
+    // The actionable part of the sentence, not just the status code.
+    expect(failure.body).toContain('gemini-2.5-flash is no longer available');
+    expect(describeAiFailure(failure)).toContain('HTTP 404');
+
+    // 224 characters capped to 200, so a huge HTML error page cannot flood stdout.
+    expect(RETIRED_MODEL_404.length).toBeGreaterThan(200);
+    expect(failure.body).toHaveLength(200);
+    expect(failure.body.endsWith('…')).toBe(true);
+  });
+
+  it('reports a rejected key, and still makes exactly one retry', async () => {
+    forced = { status: 400, body: MISSING_AUTH_400 };
+
+    const summary = await summarizeEvent(event, {
+      baseUrl,
+      model: 'gemini-3.5-flash-lite',
+      apiKey: 'sk-wrong',
+    });
+
+    // ADR-0002's single response_format retry, unchanged by any of this.
+    expect(received).toHaveLength(2);
+    expect(summary.source).toBe('rule');
+
+    const failure = summary.aiFailure;
+    if (failure?.kind !== 'http') throw new Error('expected an http failure');
+    expect(failure.status).toBe(400);
+    // 103 characters, under the cap, so it is kept exactly as the provider sent it.
+    expect(failure.body).toBe(MISSING_AUTH_400);
+    expect(describeAiFailure(failure)).toBe(`HTTP 400: ${MISSING_AUTH_400}`);
+  });
+
+  it('carries no failure when the model answers', async () => {
+    const summary = await summarizeEvent(event, { baseUrl, model: 'm', apiKey: 'k' });
+
+    expect(summary.source).toBe('ai');
+    expect(summary.aiFailure).toBeUndefined();
+  });
+
+  it('carries no failure when no API key is configured, because that is a mode', async () => {
+    const summary = await summarizeEvent(event, { baseUrl, model: 'm', apiKey: '' });
+
+    expect(received).toHaveLength(0);
+    expect(summary.source).toBe('rule');
+    expect(summary.aiFailure).toBeUndefined();
   });
 });

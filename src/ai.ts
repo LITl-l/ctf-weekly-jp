@@ -1,4 +1,4 @@
-import type { CtftimeEvent, EventSummary } from './types';
+import type { AiFailure, CtftimeEvent, EventSummary } from './types';
 import { isDifficulty, ruleSummary } from './difficulty';
 import { plainText, truncate } from './text';
 import { attempt, attemptAsync, err, ok, type Result } from './result';
@@ -12,12 +12,28 @@ export interface AiConfig {
   readonly timeoutMs?: number;
 }
 
-export type AiFailure =
-  | { readonly kind: 'network'; readonly message: string }
-  | { readonly kind: 'http'; readonly status: number }
-  | { readonly kind: 'shape'; readonly message: string };
+export type { AiFailure } from './types';
 
 const shape = (message: string): AiFailure => ({ kind: 'shape', message });
+
+/**
+ * How much of a provider's error body to keep. Enough to read the vendor's own
+ * explanation — "no longer available to new users", "Missing or invalid
+ * Authorization header" — without pasting an HTML error page into the log.
+ */
+const FAILURE_BODY_CHARS = 200;
+
+/** One line per failure, for the dry-run script. Mirrors `describeFailure` in ctftime.ts. */
+export const describeAiFailure = (failure: AiFailure): string => {
+  switch (failure.kind) {
+    case 'http':
+      return failure.body ? `HTTP ${failure.status}: ${failure.body}` : `HTTP ${failure.status}`;
+    case 'network':
+      return `network error: ${failure.message}`;
+    case 'shape':
+      return `unexpected payload: ${failure.message}`;
+  }
+};
 
 const SYSTEM_PROMPT = `あなたはCTF（Capture The Flag）に詳しい日本語のアシスタントです。
 与えられたCTFイベント情報を読み、日本のCTF初心者に向けて要約と難易度推定を行います。
@@ -144,7 +160,21 @@ const requestSummary = async (
     if (!sent.ok) return sent;
 
     const response = sent.value;
-    if (!response.ok) return err({ kind: 'http', status: response.status });
+    if (!response.ok) {
+      // The status alone cannot tell a retired model from a rejected key, so
+      // keep the provider's own words. Reading the body may itself fail; that
+      // must not escalate into a thrown error, so it degrades to a note.
+      const text = await attemptAsync(
+        () => response.text(),
+        (cause) => `<body unreadable: ${String(cause)}>`,
+      );
+      const body = text.ok ? text.value : text.error;
+      return err({
+        kind: 'http',
+        status: response.status,
+        body: truncate(body.replace(/\s+/g, ' ').trim(), FAILURE_BODY_CHARS),
+      });
+    }
 
     const body = await attemptAsync(
       () => response.json() as Promise<{ choices?: Array<{ message?: { content?: string } }> }>,
@@ -168,6 +198,14 @@ const requestSummary = async (
  * Total by contract: every failure becomes a rule-based verdict, so an event is
  * never dropped because the model was unavailable. This is the one place that
  * deliberately absorbs a Result rather than propagating it. See ADR-0004.
+ *
+ * Absorbing it is not the same as discarding it. The failure is attached to the
+ * returned summary so `npm run dryrun` can report *why* the AI stayed quiet —
+ * previously a retired model (404), a rejected key (400) and a rate limit (429)
+ * all looked identical from outside, as `summaries: {"rule":N}`. Nothing about
+ * the verdict changes: it is still rule-based and still labelled 自動判定.
+ *
+ * No key is a configured mode rather than a failure, so that path carries none.
  */
 export const summarizeEvent = async (
   event: CtftimeEvent,
@@ -175,7 +213,7 @@ export const summarizeEvent = async (
 ): Promise<EventSummary> => {
   if (!ai.apiKey) return ruleSummary(event);
   const result = await requestSummary(event, ai);
-  return result.ok ? result.value : ruleSummary(event);
+  return result.ok ? result.value : { ...ruleSummary(event), aiFailure: result.error };
 };
 
 /**

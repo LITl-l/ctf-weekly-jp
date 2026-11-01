@@ -4,3 +4,18 @@ node_modules/
 dist/
 docs/superpowers/
 .env
+
+# Credentials. jj auto-tracks new files, so a key dropped into the working copy
+# reaches a commit unless a pattern already covers it — there is no staging step
+# to catch it. A real .gemini-key was found sitting auto-added in a checkout,
+# which is why these are listed defensively rather than as needed.
+.env.*
+.gemini-key
+*.key
+*-key
+*.pem
+*.secret
+.secrets/
+
+# Personal harness overrides: machine-local, and never anyone else's business.
+.claude/settings.local.json

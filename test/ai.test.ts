@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mapWithConcurrency, parseSummary, summarizeEvent } from '../src/ai';
+import { describeAiFailure, mapWithConcurrency, parseSummary, summarizeEvent } from '../src/ai';
 import { makeEvent } from './support/event';
 
 const event = makeEvent({
@@ -62,12 +62,24 @@ describe('summarizeEvent', () => {
     const summary = await summarizeEvent(event, { ...ai, fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(summary.source).toBe('rule');
     expect(summary.difficulty).toBe('unknown');
+    expect(summary.aiFailure).toEqual({ kind: 'http', status: 500, body: 'boom' });
   });
 
   it('falls back to rules on malformed JSON', async () => {
     const fetchImpl = vi.fn(async () => aiResponse('not json at all'));
     const summary = await summarizeEvent(event, { ...ai, fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(summary.source).toBe('rule');
+    expect(summary.aiFailure?.kind).toBe('shape');
+  });
+
+  it('records a network failure rather than throwing out of a total function', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const summary = await summarizeEvent(event, { ...ai, fetchImpl: fetchImpl as unknown as typeof fetch });
+    expect(summary.source).toBe('rule');
+    expect(summary.aiFailure?.kind).toBe('network');
+    expect(describeAiFailure(summary.aiFailure!)).toContain('fetch failed');
   });
 
   it('skips the network entirely when no API key is configured', async () => {

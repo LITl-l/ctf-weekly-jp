@@ -26,6 +26,19 @@ export interface CtftimeEvent {
 
 export type Difficulty = 'beginner' | 'intermediate' | 'advanced' | 'unknown';
 
+/**
+ * Why an AI summary could not be produced. Carried as data on the summary
+ * itself rather than thrown or logged away: `summarizeEvent` is total by
+ * contract, so the failure has nowhere else to go, and a failure nobody can see
+ * is a failure nobody can diagnose. `body` is the provider's own response text,
+ * truncated — without it a 404 from a retired model, a 400 from a rejected key
+ * and a 429 are indistinguishable. See ADR-0004 and ADR-0006.
+ */
+export type AiFailure =
+  | { readonly kind: 'network'; readonly message: string }
+  | { readonly kind: 'http'; readonly status: number; readonly body: string }
+  | { readonly kind: 'shape'; readonly message: string };
+
 /** Per-event verdict. `source` records whether the AI answered or rules did. */
 export interface EventSummary {
   readonly summaryJa: string;
@@ -33,6 +46,8 @@ export interface EventSummary {
   readonly difficulty: Difficulty;
   readonly reasonJa: string;
   readonly source: 'ai' | 'rule';
+  /** Set only when the AI was tried and failed. Absent when no API key is set. */
+  readonly aiFailure?: AiFailure;
 }
 
 export interface DigestConfig {

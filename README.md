@@ -43,10 +43,24 @@ OpenAI 互換 API なら何でも使えます。無料枠のあるもの:
 
 | プロバイダ | `AI_BASE_URL` | `AI_MODEL` の例 | 無料枠 |
 |---|---|---|---|
-| Mistral（既定） | `https://api.mistral.ai/v1` | `mistral-small-latest` | Experiment ティア（毎月更新） |
+| Google Gemini（既定） | `https://generativelanguage.googleapis.com/v1beta/openai/` | `gemini-3.5-flash-lite` | 無料枠あり |
+| Mistral | `https://api.mistral.ai/v1` | `mistral-small-latest` | Experiment ティア（毎月更新） |
 | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct` | 初回1,000クレジット・40 RPM |
 | Groq | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` | 無料枠あり |
 | ローカル llama.cpp | `http://localhost:8080/v1` | 任意 | 完全無料 |
+
+> **Gemini を使う場合は、思考レベルが `minimal` のモデルを選んでください。**
+> `src/ai.ts` は `max_tokens: 700` を固定で送信しますが、Gemini ではこの上限が
+> **思考トークンと出力トークンの合計**に適用されます。思考レベルが `medium` 以上で
+> それを無効化できないモデル（`gemini-3.8-flash` など）は 700 トークンを思考だけで
+> 使い切り、出力が空のまま `finish_reason: "incomplete"` を返します。結果として
+> 全イベントが恒久的にルールベース判定にフォールバックします。
+>
+> また `gemini-flash-lite-latest` のようなエイリアスではなく、
+> `gemini-3.5-flash-lite` のように**バージョンを固定**してください。エイリアスは
+> 思考既定値の異なるモデルに差し替わることがあり、こちらの設定を何も変えていないのに
+> 上記の状態に陥ります。詳細は
+> [ADR-0006](docs/adr/0006-gemini-flash-lite-as-default-ai-provider.md) に記録しています。
 
 APIキーを設定しない場合も動作します。その場合 AI 要約は行われず、
 weight からのルールベース判定にフォールバックします（その旨が埋め込みに明記されます）。
@@ -66,10 +80,13 @@ npm run wrangler -- kv namespace create CONFIG
 npm run wrangler -- secret put AI_API_KEY
 npm run wrangler -- secret put DISCORD_WEBHOOK_URL
 npm run wrangler -- secret put DISCORD_PUBLIC_KEY   # Discord Developer Portal → General Information
-npm run wrangler -- secret put DISCORD_APP_ID
 
 npm run deploy
 ```
+
+> `DISCORD_APP_ID` は Worker のシークレットとしては**不要**です。`src/` のどこからも
+> 読んでいません。コマンド登録スクリプトがローカルの環境変数として使うだけなので、
+> 手順4で `DISCORD_APP_ID=... npm run register` の形で渡してください。
 
 > `npx` を使わないのは意図的です。`npx` はローカルに無いパッケージをレジストリから
 > 取得して実行するため、CI やセットアップ手順に混ぜるとサプライチェーン上の穴になります。
@@ -77,7 +94,7 @@ npm run deploy
 > 実行し、レジストリを参照しません。どうしても直接実行したい場合は
 > `npm exec --no -- wrangler ...`（未インストールなら取得せず失敗する）を使ってください。
 
-### 4. スラッシュコマンドを登録する
+### 4. スラッシュコマンドを登録し、アプリをサーバーに導入する
 
 ```bash
 DISCORD_APP_ID=... DISCORD_BOT_TOKEN=... npm run register
@@ -86,6 +103,15 @@ DISCORD_APP_ID=... DISCORD_BOT_TOKEN=... npm run register
 
 Discord Developer Portal →「Interactions Endpoint URL」に
 `https://ctf-weekly-jp.<your-subdomain>.workers.dev/interactions` を設定します。
+
+最後に**アプリを対象サーバーに導入します**。コマンドを登録しただけでは、
+アプリが導入されていないサーバーにはコマンドが現れません。Developer Portal の
+「Installation」（または「OAuth2」の URL Generator）で導入 URL を生成して開き、
+対象サーバーを選んで承認してください。
+
+必要なスコープは **`applications.commands` のみ**です。本Botは HTTP Interactions
+方式（[ADR-0001](docs/adr/0001-cloudflare-workers-http-interactions.md)）で動作し
+Gateway に接続しないため、`bot` スコープは要りません。
 
 ## コマンド
 
@@ -122,16 +148,26 @@ Discord Developer Portal →「Interactions Endpoint URL」に
 
 ## 開発
 
-```bash
-nix develop          # node 26 が入った開発シェル
-npm install
-npm test             # 130 tests
-npm run typecheck
-npm run dryrun       # 実際の CTFtime を叩いて結果を標準出力に表示（Discordには投稿しない）
+グローバルな Node は前提にしていません。すべて nix 経由で実行します。
 
-AI_API_KEY=xxx npm run dryrun   # AI要約つきで確認
-MAX_EVENTS=1 npm run dryrun     # 遅いローカルモデル用に1件だけ
+```bash
+nix shell nixpkgs#nodejs_26 --command npm ci
+nix shell nixpkgs#nodejs_26 --command npm test        # 135 tests
+nix shell nixpkgs#nodejs_26 --command npm run typecheck
+nix shell nixpkgs#nodejs_26 --command npm run dryrun  # 実際の CTFtime を叩いて結果を標準出力に表示（Discordには投稿しない）
+
+# 環境変数は nix shell の前に置けばそのまま渡ります
+AI_API_KEY=xxx nix shell nixpkgs#nodejs_26 --command npm run dryrun   # AI要約つきで確認
+MAX_EVENTS=1 nix shell nixpkgs#nodejs_26 --command npm run dryrun     # 遅いローカルモデル用に1件だけ
 ```
+
+> `flake.nix` には `nix develop` も用意してありますが、**このリポジトリでは現状
+> そのままでは動作しません**。スクリプトから回す場合も含め、上記の
+> `nix shell nixpkgs#nodejs_26 --command` を使ってください。
+
+AI 呼び出しが失敗したときは、`npm run dryrun` の出力末尾に `ai failures:` 行が出ます。
+HTTP ステータスとプロバイダの応答本文（200文字まで）が種類ごとに集計されるので、
+引退したモデル（404）・鍵の不備（400）・レート制限（429）を見分けられます。
 
 ## 設計判断の記録
 
@@ -144,6 +180,7 @@ MAX_EVENTS=1 npm run dryrun     # 遅いローカルモデル用に1件だけ
 | [0003](docs/adr/0003-ctftime-weight-zero-is-unrated.md) | `weight: 0` は未評価であり、初心者向けとは判定しない |
 | [0004](docs/adr/0004-errors-as-values-zero-runtime-dependencies.md) | エラーは値、データは不変、実行時依存ゼロ |
 | [0005](docs/adr/0005-defer-multi-guild-and-richer-persistence.md) | 複数サーバー対応は延期（再検討の条件つき） |
+| [0006](docs/adr/0006-gemini-flash-lite-as-default-ai-provider.md) | 既定プロバイダは Gemini、モデルは思考予算の都合でバージョン固定 |
 
 ## 設計上の注意点
 
