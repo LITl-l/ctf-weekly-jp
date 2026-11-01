@@ -7,8 +7,12 @@ compatibility_date = "2026-08-01"
 crons = ["0 0 * * 1"]
 
 [vars]
-AI_BASE_URL = "https://api.mistral.ai/v1"
-AI_MODEL = "mistral-small-latest"
+AI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# Pinned on purpose, never an alias such as gemini-flash-lite-latest: max_tokens
+# is hardcoded to 700 in src/ai.ts and on Gemini that budget covers thought
+# tokens too, so only a model that thinks at the "minimal" level fits. An alias
+# can roll onto one that does not. See ADR-0006.
+AI_MODEL = "gemini-3.5-flash-lite"
 CTFTIME_USER_AGENT = "ctf-weekly-jp/1.0 (+https://github.com/LITl-l/ctf-weekly-jp)"
 
 # Runtime config overrides written by /ctf config set
